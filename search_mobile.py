@@ -7,6 +7,8 @@ import sys
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
+from selenium.webdriver.edge.service import Service
+import words_module  # New module for word list and search term logic
 
 # A function to wait for a few seconds, preventing too many requests
 def wait_for(sec=2):
@@ -15,7 +17,7 @@ def wait_for(sec=2):
 # Mobile search
 
 # Get number of words from command line argument, default to 20 if not provided
-num_words = 20  # Default for mobile
+num_words = 30  # Default for mobile
 if len(sys.argv) > 1:
     try:
         num_words = int(sys.argv[1])
@@ -26,16 +28,18 @@ if len(sys.argv) > 1:
         print("Invalid number format. Using default (20).")
 
 # Get random words from API
-randomlists_url = f"https://random-word-api.herokuapp.com/word?number={num_words}"
-response = requests.get(randomlists_url)
-words_list = json.loads(response.text)
-print('{0} words selected from {1}'.format(len(words_list), randomlists_url))
+# randomlists_url = f"https://random-word-api.herokuapp.com/word?number={num_words}"
+# response = requests.get(randomlists_url)
+# words_list = json.loads(response.text)
+# print('{0} words selected from {1}'.format(len(words_list), randomlists_url))
+words_list = words_module.get_prepared_words(num_words)
+print(f'{len(words_list)} search terms prepared.')
 
 # Define mobile emulation with a randomly selected mobile user agent
 mobile_user_agents = [
-    "Mozilla/5.0 (Android 6.0.1; Mobile; rv:63.0) Gecko/63.0 Firefox/63.0",
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
-    "Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.85 Mobile Safari/537.36"
+    "Mozilla/5.0 (Android 14; Mobile; rv:136.0) Gecko/136.0 Firefox/136.",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_3_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3.1 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.3"
 ]
 
 # Pick a random user agent
@@ -49,12 +53,27 @@ mobile_emulation = {
 
 # Set up Edge options with mobile emulation and anti-detection features
 edge_options = webdriver.EdgeOptions()
+edge_options.add_argument("--log-level=3")  # Suppress most browser logs
+edge_options.add_argument("--silent")  # Reduce console output
 edge_options.add_experimental_option("mobileEmulation", mobile_emulation)
 edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 edge_options.add_experimental_option('useAutomationExtension', False)
 
 # Create Edge WebDriver instance with options
-driver = webdriver.Edge(options=edge_options)
+try:
+    service = Service(executable_path="msedgedriver.exe")
+    driver = webdriver.Edge(service=service, options=edge_options)
+except Exception as e:
+    print(f"WebDriver version mismatch error: {e}")
+    print("Trying without specifying driver path...")
+    try:
+        # Let Selenium find the system-installed WebDriver
+        driver = webdriver.Edge(options=edge_options)
+    except Exception as e2:
+        print(f"System WebDriver also failed: {e2}")
+        print("Please download Edge WebDriver version 140 from:")
+        print("https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/")
+        sys.exit(1)
 
 # Set window size with slight randomization to appear more natural
 window_width = random.randint(350, 390)
@@ -78,10 +97,14 @@ initial_wait = random.randint(8, 15)
 wait_for(initial_wait)
 
 # Perform mobile search actions
+total_searches = len(words_list)
 for num, word in enumerate(words_list):
-    # Vary wait times between searches to mimic human behavior
+    # Calculate and display progress
+    progress = ((num + 1) / total_searches) * 100
+    print(f'[{progress:.1f}%] {num + 1}/{total_searches}. Searching for: {word}')
+    
+    # word is now a full search phrase
     wait = random.randint(10, 30)
-    print('{0}. Searching for: {1}, {2} secs'.format(str(num + 1), word, str(wait)))
     try:
         # Navigate to Bing
         driver.get("http://www.bing.com/")
@@ -92,7 +115,7 @@ for num, word in enumerate(words_list):
         search_box = driver.find_element(By.ID, "sb_form_q")
         search_box.clear()
         
-        # Type search term with human-like timing
+        # Type search phrase (not just word)
         for char in word:
             search_box.send_keys(char)
             # Mobile typing is usually a bit slower than desktop
@@ -116,8 +139,16 @@ for num, word in enumerate(words_list):
     except Exception as e1:
         logging.error('An error occurred: %s', e1)
     
-    # Wait between searches with slight randomization
-    wait_for(wait)
+    # Check if we need a 15-minute break (every 3 searches)
+    if (num + 1) % 3 == 0 and num + 1 < len(words_list):
+        print(f"Completed {num + 1} searches. Taking a 15-minute break...")
+        wait_for(900)  # 15 minutes = 900 seconds
+        print("Break completed. Resuming searches...")
+    
+    
+    wait_between_searches = random.randint(5, 45)  # 5-45 seconds
+    print(f'Waiting {wait_between_searches} seconds before next search...')
+    wait_for(wait_between_searches)
 
 # Close the browser
 driver.quit()
